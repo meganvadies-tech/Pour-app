@@ -518,7 +518,7 @@ async function callClaude(promptText, useWebSearch){
     messages:[{role:'user', content: promptText}],
   };
   if(useWebSearch){ body.tools = [{type:'web_search_20260209', name:'web_search'}]; }
-  const res = await fetch('/.netlify/functions/claude', {
+  const res = await fetch('/api/claude', {
     method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
   });
   const data = await res.json();
