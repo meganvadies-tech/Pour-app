@@ -142,6 +142,7 @@
   table.ing{ width:100%; border-collapse:collapse; font-family:'KG Teacher Jordan','Patrick Hand'; font-size:13.5px; }
   table.ing th{ text-align:left; font-family:'Quicksand'; font-size:10px; font-weight:700; text-transform:uppercase; color:var(--ink-soft); border-bottom:1.5px solid var(--line); padding-bottom:6px; }
   table.ing td{ padding:7px 4px; border-bottom:1px solid var(--line); }
+  .step-time{ font-weight:700; color:#3E6B47; font-family:'Quicksand'; font-size:12px; text-transform:uppercase; letter-spacing:.03em; display:block; margin-bottom:3px; }
 
   .step-item{ display:flex; gap:12px; padding-bottom:14px; }
   .step-num{ width:24px;height:24px;border-radius:50%; background:var(--sage); color:#3E6B47; font-weight:700; font-size:11.5px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
@@ -832,6 +833,39 @@ function attachManualFormHandlers(editingId){
   };
 }
 
+async function tryFetchOgImage(url){
+  const proxies = [
+    'https://api.allorigins.win/raw?url=',
+    'https://corsproxy.io/?url=',
+  ];
+  for(const proxyBase of proxies){
+    try{
+      const controller = new AbortController();
+      const timeout = setTimeout(()=>controller.abort(), 8000);
+      const res = await fetch(proxyBase + encodeURIComponent(url), {signal: controller.signal});
+      clearTimeout(timeout);
+      if(!res.ok) continue;
+      const html = await res.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const metaNames = ['meta[property="og:image"]','meta[property="og:image:secure_url"]','meta[name="twitter:image"]'];
+      for(const sel of metaNames){
+        const tag = doc.querySelector(sel);
+        const content = tag && tag.getAttribute('content');
+        if(content) return new URL(content, url).href;
+      }
+      const firstImg = doc.querySelector('article img, .recipe img, [class*="recipe"] img, img');
+      if(firstImg){
+        const src = firstImg.getAttribute('src') || firstImg.getAttribute('data-src');
+        if(src) return new URL(src, url).href;
+      }
+      return '';
+    }catch(e){
+      continue;
+    }
+  }
+  return '';
+}
+
 async function fetchPageContent(url){
   const proxies = [
     'https://api.allorigins.win/raw?url=',
@@ -857,11 +891,18 @@ async function fetchPageContent(url){
   }
   return '';
 }
+
 async function handleFetchRecipe(){
   const url = document.getElementById('urlInput').value.trim();
   const statusEl = document.getElementById('urlStatus');
   if(!url){ statusEl.innerHTML = '<div class="err-msg">Please paste a recipe URL.</div>'; return; }
   statusEl.innerHTML = '<div style="margin-top:10px;font-size:12.5px;color:var(--ink-soft);"><span class="spinner"></span> Reading the page…</div>';
+  const formatInstructions = `
+FORMATTING RULES — follow exactly:
+
+INGREDIENTS: Capitalize each word in the ingredient name (Title Case), e.g. "White Rice", "Chicken Broth". Only put descriptors in the "name" field if they're required to buy the correct product (e.g. "White Rice (Long-Grain)", "Tomatoes (Fire Roasted)", "Chicken Broth (Low-Sodium)"). Everything else — state, prep instructions, or notes like "uncooked", "rinsed until water runs clear", "diced", "melted", "room temperature" — goes in the "notes" field instead, never the name.
+
+INTEGRATED COOKING TIMELINE: Instead of simple numbered steps, create a fully detailed, minute-by-minute cooking timeline for someone with zero cooking experience who should never need to leave this page or search anything else up. Each entry in the "steps" array must be a single string starting with a time range like "00:00-00:05 - " followed by the instruction (use MM:SS format, cumulative from the start of cooking). Explain every technique in plain language — never assume the reader knows what a term means (e.g. explain what "fold," "deglaze," or "simmer" means the first time it's used). The very first time block must be "00:00-0X:XX - Gather all ingredients:" followed by a newline-separated bullet list of every ingredient formatted exactly like "- [amount] [unit] — [name]" (one per line). Whenever a step uses an ingredient, mention its exact amount inline in that step's text so the user never needs to scroll back to the ingredients list. Keep time blocks realistic and sequential, accounting for both active and passive/waiting time.`;
   try{
     const pageText = await fetchPageContent(url);
     let text;
@@ -872,15 +913,17 @@ async function handleFetchRecipe(){
 ${pageText}
 """
 Extract the recipe from this text and respond with ONLY the raw JSON object below — no preamble, no markdown fences, nothing before or after the JSON itself:
-{"title":"...", "category":"one of Breakfast/Lunch/Dinner/Side Dishes/Appetizers/Snacks/Desserts", "origin":"cuisine origin", "protein":"main protein or Vegetarian", "prepTime":"e.g. 15 min", "cookTime":"e.g. 30 min", "totalTime":"e.g. 45 min", "ingredients":[{"amount":"1","unit":"cup","name":"rice","notes":""}], "steps":["step 1 text","step 2 text"]}
-Keep the recipe title free of marketing language like "easy" or "best ever" — just the name of the dish. Base this strictly on the text provided; do not invent details that aren't there.`;
+{"title":"...", "category":"one of Breakfast/Lunch/Dinner/Side Dishes/Appetizers/Snacks/Desserts", "origin":"cuisine origin", "protein":"main protein or Vegetarian", "prepTime":"e.g. 15 min", "cookTime":"e.g. 30 min", "totalTime":"e.g. 45 min", "ingredients":[{"amount":"1","unit":"cup","name":"rice","notes":""}], "steps":["00:00-00:05 - ...","..."]}
+Keep the recipe title free of marketing language like "easy" or "best ever" — just the name of the dish. Base this strictly on the text provided; do not invent details that aren't there.
+${formatInstructions}`;
       text = await callClaude(prompt, false);
     } else {
       statusEl.innerHTML = '<div style="margin-top:10px;font-size:12.5px;color:var(--ink-soft);"><span class="spinner"></span> Couldn\'t read the page directly — trying a web search instead…</div>';
       const prompt = `Use web search to find and read the recipe at this URL: ${url}
 Once you have the information, respond with ONLY the raw JSON object below — no preamble, no explanation of your search process, no markdown fences, nothing before or after the JSON itself:
-{"title":"...", "category":"one of Breakfast/Lunch/Dinner/Side Dishes/Appetizers/Snacks/Desserts", "origin":"cuisine origin", "protein":"main protein or Vegetarian", "prepTime":"e.g. 15 min", "cookTime":"e.g. 30 min", "totalTime":"e.g. 45 min", "ingredients":[{"amount":"1","unit":"cup","name":"rice","notes":""}], "steps":["step 1 text","step 2 text"]}
-Keep the recipe title free of marketing language like "easy" or "best ever" — just the name of the dish. Base this strictly on what you find at the URL.`;
+{"title":"...", "category":"one of Breakfast/Lunch/Dinner/Side Dishes/Appetizers/Snacks/Desserts", "origin":"cuisine origin", "protein":"main protein or Vegetarian", "prepTime":"e.g. 15 min", "cookTime":"e.g. 30 min", "totalTime":"e.g. 45 min", "ingredients":[{"amount":"1","unit":"cup","name":"rice","notes":""}], "steps":["00:00-00:05 - ...","..."]}
+Keep the recipe title free of marketing language like "easy" or "best ever" — just the name of the dish. Base this strictly on what you find at the URL.
+${formatInstructions}`;
       text = await callClaude(prompt, true);
     }
     const parsed = parseJsonLoose(text);
@@ -904,7 +947,6 @@ Keep the recipe title free of marketing language like "easy" or "best ever" — 
   }
 }
 
-
 /* ============================= RECIPE DETAIL ============================= */
 function renderRecipeDetail(){
   const r = state.recipes.find(x=>x.id===state.ui.currentRecipeId);
@@ -918,8 +960,23 @@ function renderRecipeDetail(){
     </button>`;
   }).join('');
 
-  const ingRows = r.ingredients.map(i=>`<tr><td>${esc(i.amount)} ${esc(i.unit||'')}</td><td>${esc(i.name)}</td><td>${esc(i.notes||'')}</td></tr>`).join('');
-  const stepsHtml = r.steps.map((s,idx)=>`<div class="step-item"><div class="step-num">${idx+1}</div><div class="step-text">${esc(s.instruction)}</div></div>`).join('') || '<div style="color:var(--ink-soft);font-size:13px;">No steps added yet.</div>';
+  function titleCase(str){
+    if(!str) return str;
+    const lower = new Set(['a','an','and','the','of','in','on','for','with','to','or']);
+    return str.split(' ').map((w,idx)=>{
+      if(!w) return w;
+      if(idx>0 && lower.has(w.toLowerCase())) return w.toLowerCase();
+      return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase();
+    }).join(' ');
+  }
+  const ingRows = r.ingredients.map(i=>`<tr><td>${esc(i.amount)} ${esc(i.unit||'')}</td><td>${esc(titleCase(i.name))}</td><td>${esc(i.notes||'')}</td></tr>`).join('');
+  function formatStepText(text){
+    let t = esc(text||'');
+    t = t.replace(/^(\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2})\s*[-–]\s*/, '<span class="step-time">$1</span>');
+    t = t.replace(/\n/g, '<br>');
+    return t;
+  }
+  const stepsHtml = r.steps.map((s,idx)=>`<div class="step-item"><div class="step-num">${idx+1}</div><div class="step-text">${formatStepText(s.instruction)}</div></div>`).join('') || '<div style="color:var(--ink-soft);font-size:13px;">No steps added yet.</div>';
 
   // baby/puppy safe computed from ingredient list
   const babyRows=[], puppyRows=[];
@@ -1074,7 +1131,8 @@ Ingredients: ${r.ingredients.map(i=>`${i.amount} ${i.unit} ${i.name} ${i.notes}`
 Steps: ${r.steps.map(s=>s.instruction).join(' ')}
 
 Create a lower-calorie, healthier version of this recipe if reasonably possible (ingredient swaps, portion or technique changes). If it is NOT reasonably possible to make a meaningfully healthier version (e.g. it's already a light dish, or it's a dessert where "healthy" doesn't meaningfully apply), respond with exactly: {"possible": false, "reason": "short explanation"}
-Otherwise respond with ONLY raw JSON (no markdown fences): {"possible": true, "title":"...", "ingredients":[{"amount":"1","unit":"cup","name":"...","notes":"..."}], "steps":["..."]}`;
+Otherwise respond with ONLY raw JSON (no markdown fences): {"possible": true, "title":"...", "ingredients":[{"amount":"1","unit":"cup","name":"...","notes":"..."}], "steps":["00:00-00:05 - ...","..."]}
+Follow the same formatting rules: Title Case ingredient names with only purchase-critical descriptors in parentheses in the name (prep notes go in "notes" instead), and write steps as a full minute-by-minute Integrated Cooking Timeline the way a beginner could follow with no outside help, embedding ingredient amounts directly in the relevant steps.`;
       const text = await callClaude(prompt, false);
       const parsed = parseJsonLoose(text);
       if(!parsed.possible){
@@ -1634,132 +1692,4 @@ function attachPrepDayHandlers(){
     statusEl.innerHTML = '<div style="margin-top:8px;font-size:12.5px;color:var(--ink-soft);"><span class="spinner"></span> Building your prep plan…</div>';
     try{
       const meals = weekMealsSummary();
-      const desc = meals.map(m=>`${m.day} ${m.slot}: ${m.recipe.title} — ingredients: ${m.recipe.ingredients.map(i=>`${i.amount} ${i.unit} ${i.name}`).join(', ')}`).join('\n');
-      const prompt = `Here is a family's meal plan for the week:\n${desc}\n\nCreate a consolidated Sunday prep-day plan. Group similar tasks together (e.g. chop all vegetables at once, marinate proteins together, assemble freezer meals). Also list which prepped items should go in the freezer vs the fridge.
-Respond with ONLY raw JSON (no markdown fences): {"steps":["Chop all vegetables for the week","Marinate chicken and turkey together","..."], "freezer":["item + note"], "fridge":["item + note"]}`;
-      const text = await callClaude(prompt, false);
-      const parsed = parseJsonLoose(text);
-      state.ui.prepPlan = parsed;
-      saveState(); render();
-    }catch(e){
-      statusEl.innerHTML = `<div class="err-msg">Couldn't build a prep plan (${esc(e.message)}).</div>`;
-    }
-  };
-}
-
-/* ============================= FIRST FOODS CHECKLIST ============================= */
-function renderFirstFoods(){
-  const total = state.firstFoods.length;
-  const done = state.firstFoods.filter(f=>f.dateGiven).length;
-  const pct = total ? Math.round((done/total)*100) : 0;
-  const cats = [...new Set(state.firstFoods.map(f=>f.category))];
-  const rows = cats.map(cat=>{
-    const items = state.firstFoods.filter(f=>f.category===cat);
-    return `<div class="cat-label">${esc(cat)}</div>` + items.map(f=>`
-      <div class="shop-row">
-        <button class="shop-check ${f.dateGiven?'done':''}" data-food-toggle="${f.id}">${f.dateGiven?'✓':''}</button>
-        <div class="shop-name ${f.dateGiven?'done':''}" style="flex:1;">${esc(f.name)}</div>
-        <input type="date" class="food-date-input" data-food-date="${f.id}" value="${f.dateGiven||''}">
-      </div>`).join('');
-  }).join('');
-
-  return `
-    <div class="hero" style="background:radial-gradient(120% 130% at 15% 0%, var(--lavender) 0%, var(--cream) 75%);">
-      <h1 style="font-size:30px;">First Foods Checklist</h1>
-      <div class="sub">${done} of ${total} foods introduced</div>
-      <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
-    </div>
-    ${rows}
-  `;
-}
-function attachFirstFoodsHandlers(){
-  document.querySelectorAll('[data-food-toggle]').forEach(b=> b.onclick=()=>{
-    const f = state.firstFoods.find(x=>x.id===b.dataset.foodToggle);
-    f.dateGiven = f.dateGiven ? '' : todayISO();
-    saveState(); render();
-  });
-  document.querySelectorAll('[data-food-date]').forEach(inp=> inp.onchange=()=>{
-    const f = state.firstFoods.find(x=>x.id===inp.dataset.foodDate);
-    f.dateGiven = inp.value; saveState(); render();
-  });
-}
-
-/* ============================= NUTRITION GOALS ============================= */
-const VEGGIE_WORDS = ['broccoli','green bean','spinach','carrot','zucchini','pea','cauliflower','beet','pepper','squash','sweet potato','lettuce','kale','tomato','onion','garlic','cucumber'];
-const FRUIT_WORDS = ['apple','banana','blueberry','peach','pear','mango','strawberry','watermelon','grape','orange','lemon','avocado','prune'];
-function renderNutrition(){
-  const meals = weekMealsSummary();
-  let proteinG = 0, veggieServings = 0, fruitServings = 0;
-  meals.forEach(m=>{
-    if(m.recipe.nutrition && m.recipe.nutrition.protein){
-      proteinG += parseFloat(m.recipe.nutrition.protein) || 0;
-    }
-    m.recipe.ingredients.forEach(ing=>{
-      const n = (ing.name||'').toLowerCase();
-      if(VEGGIE_WORDS.some(w=>n.includes(w))) veggieServings++;
-      if(FRUIT_WORDS.some(w=>n.includes(w))) fruitServings++;
-    });
-  });
-  const weekStart = weekDates()[0].toISOString().slice(0,10);
-  const weekEnd = weekDates()[6].toISOString().slice(0,10);
-  const koraExposures = state.firstFoods.filter(f=> f.dateGiven && f.dateGiven>=weekStart && f.dateGiven<=weekEnd).length;
-
-  const goals = [
-    {label:'Protein', have:Math.round(proteinG), target:200, unit:'g'},
-    {label:'Veggie servings', have:veggieServings, target:14, unit:''},
-    {label:'Fruit servings', have:fruitServings, target:10, unit:''},
-    {label:'Kora — new foods exposed', have:koraExposures, target:3, unit:''},
-  ];
-
-  return `
-    <h2 class="fdisp" style="font-size:30px;margin:0 0 4px;">Nutrition Goals</h2>
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:16px;">This week, estimated from your meal plan · protein needs nutrition data added to recipes to be accurate</div>
-    ${goals.map(g=>{
-      const pct = Math.min(100, Math.round((g.have/g.target)*100));
-      return `<div class="goal-card">
-        <div class="goal-top"><span>${g.label}</span><span class="amt">${g.have}${g.unit} / ${g.target}${g.unit}</span></div>
-        <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
-      </div>`;
-    }).join('')}
-    <div class="card" style="margin-top:8px;">
-      <div class="section-label" style="margin-bottom:8px;">Gaps &amp; Suggestions</div>
-      <div class="fhand" style="font-size:14px;line-height:1.5;">
-        ${veggieServings < 14 ? '🥦 Try adding a veggie side to a couple more dinners this week.<br>' : ''}
-        ${fruitServings < 10 ? '🍓 A fruit side at breakfast is an easy way to close the gap.<br>' : ''}
-        ${koraExposures < 3 ? '🍼 Check the First Foods Checklist for a new food to try with Kora this week.' : 'Nice work keeping variety in the mix this week!'}
-      </div>
-    </div>
-  `;
-}
-
-/* ============================= SEASONAL & HOLIDAY ============================= */
-const SEASONS = ['Spring','Summer','Fall','Winter'];
-const HOLIDAYS = ['New Year',"Valentine's Day","St. Patrick's Day",'Easter','Independence Day','Halloween','Thanksgiving','Christmas'];
-function renderSeasonal(){
-  const seasonSections = SEASONS.map(s=>{
-    const matches = state.recipes.filter(r=> (r.seasonalTags||[]).includes(s));
-    return `<div class="cat-label">${s}</div>` + (matches.length ? `<div class="recipe-grid" style="margin-bottom:8px;">${matches.map(r=>`<div class="recipe-tile" data-open-recipe="${r.id}"><div class="img">${imgTag(r.headerImage)}</div><div class="info"><div class="title">${esc(r.title)}</div></div></div>`).join('')}</div>` : `<div style="color:var(--ink-soft);font-size:13px;margin-bottom:8px;">No recipes tagged yet.</div>`);
-  }).join('');
-  const holidaySections = HOLIDAYS.map(h=>{
-    const matches = state.recipes.filter(r=> (r.holidayTags||[]).includes(h));
-    if(!matches.length) return '';
-    return `<div class="cat-label">${h}</div><div class="recipe-grid" style="margin-bottom:8px;">${matches.map(r=>`<div class="recipe-tile" data-open-recipe="${r.id}"><div class="img">${imgTag(r.headerImage)}</div><div class="info"><div class="title">${esc(r.title)}</div></div></div>`).join('')}</div>`;
-  }).join('');
-
-  return `
-    <h2 class="fdisp" style="font-size:30px;margin:0 0 16px;">Seasonal &amp; Holiday</h2>
-    <div class="section-label">By Season</div>
-    ${seasonSections}
-    <hr class="dash">
-    <div class="section-label">By Holiday</div>
-    ${holidaySections || "<div style='color:var(--ink-soft);font-size:13px;'>No holiday-tagged recipes yet — add tags from a recipe's Edit screen.</div>"}
-  `;
-}
-function attachSeasonalHandlers(){
-  document.querySelectorAll('[data-open-recipe]').forEach(b=> b.onclick=()=> setView('recipe-detail',{currentRecipeId:b.dataset.openRecipe}));
-}
-
-loadState();
-</script>
-</body>
-</html>
+      const desc = meals.map(m=>`${m.day} ${m.slot}: ${m.recipe.title} — ingredients: ${m.recipe.ingredients.map(i=>`${i.amou
