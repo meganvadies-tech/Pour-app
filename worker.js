@@ -2,6 +2,55 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // Handle server-side page fetching (avoids unreliable public CORS proxies)
+    if (url.pathname === "/api/fetch-page") {
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+          },
+        });
+      }
+
+      if (request.method === "POST") {
+        try {
+          const { url: targetUrl } = await request.json();
+          if (!targetUrl) {
+            return new Response(
+              JSON.stringify({ error: "Missing url" }),
+              { status: 400, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
+            );
+          }
+
+          const pageResponse = await fetch(targetUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            },
+          });
+
+          if (!pageResponse.ok) {
+            return new Response(
+              JSON.stringify({ error: `Page returned status ${pageResponse.status}` }),
+              { status: 502, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
+            );
+          }
+
+          const html = await pageResponse.text();
+          return new Response(JSON.stringify({ html }), {
+            status: 200,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+          });
+        } catch (err) {
+          return new Response(
+            JSON.stringify({ error: "Fetch failed", details: err.message }),
+            { status: 500, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
+          );
+        }
+      }
+    }
+
     // Handle the Claude API proxy route
     if (url.pathname === "/api/claude") {
       if (request.method === "OPTIONS") {
