@@ -66,27 +66,3 @@ export default {
     return env.ASSETS.fetch(request);
   },
 };
-          });
-
-          const data = await anthropicResponse.json();
-
-          return new Response(JSON.stringify(data), {
-            status: anthropicResponse.status,
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
-            },
-          });
-        } catch (err) {
-          return new Response(
-            JSON.stringify({ error: "Function error", details: err.message }),
-            { status: 500, headers: { "Content-Type": "application/json" } }
-          );
-        }
-      }
-    }
-
-    // Everything else: serve the static site (index.html, fonts, etc.)
-    return env.ASSETS.fetch(request);
-  },
-};
