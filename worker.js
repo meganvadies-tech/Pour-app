@@ -39,8 +39,20 @@ export default {
             body: JSON.stringify(body),
           });
 
-          const data = await anthropicResponse.json();
           console.log("Anthropic responded with status:", anthropicResponse.status);
+
+          let data;
+          const rawText = await anthropicResponse.text();
+          try {
+            data = JSON.parse(rawText);
+          } catch (parseErr) {
+            console.log("Anthropic returned non-JSON body:", rawText.slice(0, 200));
+            return new Response(
+              JSON.stringify({ error: `Request to Anthropic failed or timed out (status ${anthropicResponse.status}). Please try again.` }),
+              { status: 502, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
+            );
+          }
+
           if (anthropicResponse.status !== 200) {
             console.log("Anthropic error body:", JSON.stringify(data));
           }
