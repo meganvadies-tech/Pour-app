@@ -861,13 +861,28 @@ async function handleFetchRecipe(){
   const url = document.getElementById('urlInput').value.trim();
   const statusEl = document.getElementById('urlStatus');
   if(!url){ statusEl.innerHTML = '<div class="err-msg">Please paste a recipe URL.</div>'; return; }
-  statusEl.innerHTML = '<div style="margin-top:10px;font-size:12.5px;color:var(--ink-soft);"><span class="spinner"></span> Fetching and reading the recipe…</div>';
+  statusEl.innerHTML = '<div style="margin-top:10px;font-size:12.5px;color:var(--ink-soft);"><span class="spinner"></span> Reading the page…</div>';
   try{
-    const prompt = `Use web search to find and read the recipe at this URL: ${url}
+    const pageText = await fetchPageContent(url);
+    let text;
+    if(pageText){
+      statusEl.innerHTML = '<div style="margin-top:10px;font-size:12.5px;color:var(--ink-soft);"><span class="spinner"></span> Extracting the recipe…</div>';
+      const prompt = `Here is the text content of a recipe webpage at ${url}:
+"""
+${pageText}
+"""
+Extract the recipe from this text and respond with ONLY the raw JSON object below — no preamble, no markdown fences, nothing before or after the JSON itself:
+{"title":"...", "category":"one of Breakfast/Lunch/Dinner/Side Dishes/Appetizers/Snacks/Desserts", "origin":"cuisine origin", "protein":"main protein or Vegetarian", "prepTime":"e.g. 15 min", "cookTime":"e.g. 30 min", "totalTime":"e.g. 45 min", "ingredients":[{"amount":"1","unit":"cup","name":"rice","notes":""}], "steps":["step 1 text","step 2 text"]}
+Keep the recipe title free of marketing language like "easy" or "best ever" — just the name of the dish. Base this strictly on the text provided; do not invent details that aren't there.`;
+      text = await callClaude(prompt, false);
+    } else {
+      statusEl.innerHTML = '<div style="margin-top:10px;font-size:12.5px;color:var(--ink-soft);"><span class="spinner"></span> Couldn\'t read the page directly — trying a web search instead…</div>';
+      const prompt = `Use web search to find and read the recipe at this URL: ${url}
 Once you have the information, respond with ONLY the raw JSON object below — no preamble, no explanation of your search process, no markdown fences, nothing before or after the JSON itself:
-{"title":"...", "category":"one of Breakfast/Lunch/Dinner/Side Dishes/Appetizers/Snacks/Desserts", "origin":"cuisine origin", "protein":"main protein or Vegetarian", "prepTime":"e.g. 15 min", "cookTime":"e.g. 30 min", "totalTime":"e.g. 45 min", "headerImage":"the URL of the main recipe photo on the page (e.g. the og:image meta tag or the largest recipe photo), or empty string if none found", "ingredients":[{"amount":"1","unit":"cup","name":"rice","notes":""}], "steps":["step 1 text","step 2 text"]}
-Keep the recipe title free of marketing language like "easy" or "best ever" — just the name of the dish. Base this strictly on what you find at the URL. For headerImage, only return a real, complete image URL you found on the page — never invent one.`;
-    const text = await callClaude(prompt, true);
+{"title":"...", "category":"one of Breakfast/Lunch/Dinner/Side Dishes/Appetizers/Snacks/Desserts", "origin":"cuisine origin", "protein":"main protein or Vegetarian", "prepTime":"e.g. 15 min", "cookTime":"e.g. 30 min", "totalTime":"e.g. 45 min", "ingredients":[{"amount":"1","unit":"cup","name":"rice","notes":""}], "steps":["step 1 text","step 2 text"]}
+Keep the recipe title free of marketing language like "easy" or "best ever" — just the name of the dish. Base this strictly on what you find at the URL.`;
+      text = await callClaude(prompt, true);
+    }
     const parsed = parseJsonLoose(text);
     statusEl.innerHTML = '<div style="margin-top:10px;font-size:12.5px;color:var(--ink-soft);"><span class="spinner"></span> Grabbing the recipe photo…</div>';
     let headerImage = '';
@@ -888,6 +903,7 @@ Keep the recipe title free of marketing language like "easy" or "best ever" — 
     statusEl.innerHTML = `<div class="err-msg">Couldn't fetch that recipe (${esc(e.message)}). Try "Enter Manually" instead.</div>`;
   }
 }
+
 
 /* ============================= RECIPE DETAIL ============================= */
 function renderRecipeDetail(){
