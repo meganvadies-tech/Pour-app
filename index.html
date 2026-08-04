@@ -832,7 +832,7 @@ function attachManualFormHandlers(editingId){
   };
 }
 
-async function tryFetchOgImage(url){
+async function fetchPageContent(url){
   const proxies = [
     'https://api.allorigins.win/raw?url=',
     'https://corsproxy.io/?url=',
@@ -846,18 +846,11 @@ async function tryFetchOgImage(url){
       if(!res.ok) continue;
       const html = await res.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
-      const metaNames = ['meta[property="og:image"]','meta[property="og:image:secure_url"]','meta[name="twitter:image"]'];
-      for(const sel of metaNames){
-        const tag = doc.querySelector(sel);
-        const content = tag && tag.getAttribute('content');
-        if(content) return new URL(content, url).href;
-      }
-      const firstImg = doc.querySelector('article img, .recipe img, [class*="recipe"] img, img');
-      if(firstImg){
-        const src = firstImg.getAttribute('src') || firstImg.getAttribute('data-src');
-        if(src) return new URL(src, url).href;
-      }
-      return '';
+      doc.querySelectorAll('script,style,noscript,svg,nav,footer,header,iframe').forEach(el=>el.remove());
+      let text = doc.body ? doc.body.textContent : '';
+      text = text.replace(/[ \t]+/g,' ').replace(/\n{2,}/g,'\n').trim();
+      if(text.length > 12000) text = text.slice(0, 12000);
+      if(text && text.length > 200) return text;
     }catch(e){
       continue;
     }
