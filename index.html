@@ -1692,4 +1692,132 @@ function attachPrepDayHandlers(){
     statusEl.innerHTML = '<div style="margin-top:8px;font-size:12.5px;color:var(--ink-soft);"><span class="spinner"></span> Building your prep plan…</div>';
     try{
       const meals = weekMealsSummary();
-      const desc = meals.map(m=>`${m.day} ${m.slot}: ${m.recipe.title} — ingredients: ${m.recipe.ingredients.map(i=>`${i.amou
+      const desc = meals.map(m=>`${m.day} ${m.slot}: ${m.recipe.title} — ingredients: ${m.recipe.ingredients.map(i=>`${i.amount} ${i.unit} ${i.name}`).join(', ')}`).join('\n');
+      const prompt = `Here is a family's meal plan for the week:\n${desc}\n\nCreate a consolidated Sunday prep-day plan. Group similar tasks together (e.g. chop all vegetables at once, marinate proteins together, assemble freezer meals). Also list which prepped items should go in the freezer vs the fridge.
+Respond with ONLY raw JSON (no markdown fences): {"steps":["Chop all vegetables for the week","Marinate chicken and turkey together","..."], "freezer":["item + note"], "fridge":["item + note"]}`;
+      const text = await callClaude(prompt, false);
+      const parsed = parseJsonLoose(text);
+      state.ui.prepPlan = parsed;
+      saveState(); render();
+    }catch(e){
+      statusEl.innerHTML = `<div class="err-msg">Couldn't build a prep plan (${esc(e.message)}).</div>`;
+    }
+  };
+}
+
+/* ============================= FIRST FOODS CHECKLIST ============================= */
+function renderFirstFoods(){
+  const total = state.firstFoods.length;
+  const done = state.firstFoods.filter(f=>f.dateGiven).length;
+  const pct = total ? Math.round((done/total)*100) : 0;
+  const cats = [...new Set(state.firstFoods.map(f=>f.category))];
+  const rows = cats.map(cat=>{
+    const items = state.firstFoods.filter(f=>f.category===cat);
+    return `<div class="cat-label">${esc(cat)}</div>` + items.map(f=>`
+      <div class="shop-row">
+        <button class="shop-check ${f.dateGiven?'done':''}" data-food-toggle="${f.id}">${f.dateGiven?'✓':''}</button>
+        <div class="shop-name ${f.dateGiven?'done':''}" style="flex:1;">${esc(f.name)}</div>
+        <input type="date" class="food-date-input" data-food-date="${f.id}" value="${f.dateGiven||''}">
+      </div>`).join('');
+  }).join('');
+
+  return `
+    <div class="hero" style="background:radial-gradient(120% 130% at 15% 0%, var(--lavender) 0%, var(--cream) 75%);">
+      <h1 style="font-size:30px;">First Foods Checklist</h1>
+      <div class="sub">${done} of ${total} foods introduced</div>
+      <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+    </div>
+    ${rows}
+  `;
+}
+function attachFirstFoodsHandlers(){
+  document.querySelectorAll('[data-food-toggle]').forEach(b=> b.onclick=()=>{
+    const f = state.firstFoods.find(x=>x.id===b.dataset.foodToggle);
+    f.dateGiven = f.dateGiven ? '' : todayISO();
+    saveState(); render();
+  });
+  document.querySelectorAll('[data-food-date]').forEach(inp=> inp.onchange=()=>{
+    const f = state.firstFoods.find(x=>x.id===inp.dataset.foodDate);
+    f.dateGiven = inp.value; saveState(); render();
+  });
+}
+
+/* ============================= NUTRITION GOALS ============================= */
+const VEGGIE_WORDS = ['broccoli','green bean','spinach','carrot','zucchini','pea','cauliflower','beet','pepper','squash','sweet potato','lettuce','kale','tomato','onion','garlic','cucumber'];
+const FRUIT_WORDS = ['apple','banana','blueberry','peach','pear','mango','strawberry','watermelon','grape','orange','lemon','avocado','prune'];
+function renderNutrition(){
+  const meals = weekMealsSummary();
+  let proteinG = 0, veggieServings = 0, fruitServings = 0;
+  meals.forEach(m=>{
+    if(m.recipe.nutrition && m.recipe.nutrition.protein){
+      proteinG += parseFloat(m.recipe.nutrition.protein) || 0;
+    }
+    m.recipe.ingredients.forEach(ing=>{
+      const n = (ing.name||'').toLowerCase();
+      if(VEGGIE_WORDS.some(w=>n.includes(w))) veggieServings++;
+      if(FRUIT_WORDS.some(w=>n.includes(w))) fruitServings++;
+    });
+  });
+  const weekStart = weekDates()[0].toISOString().slice(0,10);
+  const weekEnd = weekDates()[6].toISOString().slice(0,10);
+  const koraExposures = state.firstFoods.filter(f=> f.dateGiven && f.dateGiven>=weekStart && f.dateGiven<=weekEnd).length;
+
+  const goals = [
+    {label:'Protein', have:Math.round(proteinG), target:200, unit:'g'},
+    {label:'Veggie servings', have:veggieServings, target:14, unit:''},
+    {label:'Fruit servings', have:fruitServings, target:10, unit:''},
+    {label:'Kora — new foods exposed', have:koraExposures, target:3, unit:''},
+  ];
+
+  return `
+    <h2 class="fdisp" style="font-size:30px;margin:0 0 4px;">Nutrition Goals</h2>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:16px;">This week, estimated from your meal plan · protein needs nutrition data added to recipes to be accurate</div>
+    ${goals.map(g=>{
+      const pct = Math.min(100, Math.round((g.have/g.target)*100));
+      return `<div class="goal-card">
+        <div class="goal-top"><span>${g.label}</span><span class="amt">${g.have}${g.unit} / ${g.target}${g.unit}</span></div>
+        <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+      </div>`;
+    }).join('')}
+    <div class="card" style="margin-top:8px;">
+      <div class="section-label" style="margin-bottom:8px;">Gaps &amp; Suggestions</div>
+      <div class="fhand" style="font-size:14px;line-height:1.5;">
+        ${veggieServings < 14 ? '🥦 Try adding a veggie side to a couple more dinners this week.<br>' : ''}
+        ${fruitServings < 10 ? '🍓 A fruit side at breakfast is an easy way to close the gap.<br>' : ''}
+        ${koraExposures < 3 ? '🍼 Check the First Foods Checklist for a new food to try with Kora this week.' : 'Nice work keeping variety in the mix this week!'}
+      </div>
+    </div>
+  `;
+}
+
+/* ============================= SEASONAL & HOLIDAY ============================= */
+const SEASONS = ['Spring','Summer','Fall','Winter'];
+const HOLIDAYS = ['New Year',"Valentine's Day","St. Patrick's Day",'Easter','Independence Day','Halloween','Thanksgiving','Christmas'];
+function renderSeasonal(){
+  const seasonSections = SEASONS.map(s=>{
+    const matches = state.recipes.filter(r=> (r.seasonalTags||[]).includes(s));
+    return `<div class="cat-label">${s}</div>` + (matches.length ? `<div class="recipe-grid" style="margin-bottom:8px;">${matches.map(r=>`<div class="recipe-tile" data-open-recipe="${r.id}"><div class="img">${imgTag(r.headerImage)}</div><div class="info"><div class="title">${esc(r.title)}</div></div></div>`).join('')}</div>` : `<div style="color:var(--ink-soft);font-size:13px;margin-bottom:8px;">No recipes tagged yet.</div>`);
+  }).join('');
+  const holidaySections = HOLIDAYS.map(h=>{
+    const matches = state.recipes.filter(r=> (r.holidayTags||[]).includes(h));
+    if(!matches.length) return '';
+    return `<div class="cat-label">${h}</div><div class="recipe-grid" style="margin-bottom:8px;">${matches.map(r=>`<div class="recipe-tile" data-open-recipe="${r.id}"><div class="img">${imgTag(r.headerImage)}</div><div class="info"><div class="title">${esc(r.title)}</div></div></div>`).join('')}</div>`;
+  }).join('');
+
+  return `
+    <h2 class="fdisp" style="font-size:30px;margin:0 0 16px;">Seasonal &amp; Holiday</h2>
+    <div class="section-label">By Season</div>
+    ${seasonSections}
+    <hr class="dash">
+    <div class="section-label">By Holiday</div>
+    ${holidaySections || "<div style='color:var(--ink-soft);font-size:13px;'>No holiday-tagged recipes yet — add tags from a recipe's Edit screen.</div>"}
+  `;
+}
+function attachSeasonalHandlers(){
+  document.querySelectorAll('[data-open-recipe]').forEach(b=> b.onclick=()=> setView('recipe-detail',{currentRecipeId:b.dataset.openRecipe}));
+}
+
+loadState();
+</script>
+</body>
+</html>
