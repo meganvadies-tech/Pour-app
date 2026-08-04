@@ -246,6 +246,7 @@
 </style>
 </head>
 <body>
+
 <div id="app">
   <div class="overlay-bg" id="mobileOverlay"></div>
   <aside id="sidebar">
@@ -306,7 +307,6 @@ const FOOD_REFERENCE = {
   avocado:{ baby:{6:'Mashed or soft sliced — great first food.'}, puppy:{safe:false, note:'Pit and skin are toxic; best to avoid sharing the flesh too.'} },
   salt:{ baby:{ '<12':'Avoid added salt before 12 months.' }, puppy:{safe:false, note:'Avoid excess salt.'} },
 };
-
 function matchFoodRef(name){
   const n = (name||'').toLowerCase();
   for(const key in FOOD_REFERENCE){ if(n.includes(key)) return {key, ...FOOD_REFERENCE[key]}; }
@@ -881,30 +881,27 @@ async function callClaudeWithRetry(prompt, useWebSearch, retries){
 }
 
 async function fetchPageContent(url){
-  const proxies = [
-    'https://api.allorigins.win/raw?url=',
-    'https://corsproxy.io/?url=',
-    'https://api.codetabs.com/v1/proxy?quest=',
-  ];
-  for(const proxyBase of proxies){
-    try{
-      const controller = new AbortController();
-      const timeout = setTimeout(()=>controller.abort(), 8000);
-      const res = await fetch(proxyBase + encodeURIComponent(url), {signal: controller.signal});
-      clearTimeout(timeout);
-      if(!res.ok) continue;
-      const html = await res.text();
-      const doc = new DOMParser().parseFromString(html, 'text/html');
-      doc.querySelectorAll('script,style,noscript,svg,nav,footer,header,iframe').forEach(el=>el.remove());
-      let text = doc.body ? doc.body.textContent : '';
-      text = text.replace(/[ \t]+/g,' ').replace(/\n{2,}/g,'\n').trim();
-      if(text.length > 12000) text = text.slice(0, 12000);
-      if(text && text.length > 200) return text;
-    }catch(e){
-      continue;
-    }
+  try{
+    const controller = new AbortController();
+    const timeout = setTimeout(()=>controller.abort(), 15000);
+    const res = await fetch('/api/fetch-page', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({url}), signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if(!res.ok) return '';
+    const data = await res.json();
+    if(!data.html) return '';
+    const doc = new DOMParser().parseFromString(data.html, 'text/html');
+    doc.querySelectorAll('script,style,noscript,svg,nav,footer,header,iframe').forEach(el=>el.remove());
+    let text = doc.body ? doc.body.textContent : '';
+    text = text.replace(/[ \t]+/g,' ').replace(/\n{2,}/g,'\n').trim();
+    if(text.length > 12000) text = text.slice(0, 12000);
+    if(text && text.length > 200) return text;
+    return '';
+  }catch(e){
+    return '';
   }
-  return '';
 }
 
 async function handleFetchRecipe(){
@@ -1091,7 +1088,8 @@ function renderRecipeDetail(){
     </div>
   `;
 }
-      function attachRecipeDetailHandlers(){
+
+function attachRecipeDetailHandlers(){
   const r = state.recipes.find(x=>x.id===state.ui.currentRecipeId);
   if(!r) return;
   document.getElementById('backToRecipes').onclick = ()=> setView('recipes');
